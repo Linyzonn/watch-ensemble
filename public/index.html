@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Watch Ensemble — cinéma pour deux</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Outfit:wght@400;500;600&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --nuit: #121430;        /* fond : nuit indigo */
+    --loge: #1c2044;        /* panneaux */
+    --loge-2: #252a56;      /* panneaux survolés / bordures */
+    --faisceau: #ffc55c;    /* ambre du projecteur */
+    --velours: #ff8fa5;     /* rose : présence de l'autre */
+    --ecran: #f4f1e4;       /* texte principal, blanc chaud */
+    --brume: #9aa0c2;       /* texte secondaire */
+    --rayon: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: var(--nuit);
+    color: var(--ecran);
+    font-family: "Outfit", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  .page { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
+
+  h1, h2 { font-family: "Fraunces", Georgia, serif; font-weight: 650; letter-spacing: -0.01em; }
+
+  button {
+    font: inherit; cursor: pointer; border: none; border-radius: var(--rayon);
+    color: inherit; background: var(--loge-2);
+    padding: 12px 18px; font-weight: 600;
+  }
+  button:focus-visible, input:focus-visible, a:focus-visible {
+    outline: 2px solid var(--faisceau); outline-offset: 2px;
+  }
+  button.primaire { background: var(--faisceau); color: #201a08; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  input[type="text"], input[type="url"] {
+    font: inherit; color: var(--ecran);
+    background: var(--nuit); border: 1px solid var(--loge-2);
+    border-radius: var(--rayon); padding: 12px 14px; width: 100%;
+  }
+  input::placeholder { color: var(--brume); }
+
+  .cache { display: none !important; }
+
+  /* ------------------------------------------------------------------ */
+  /* Accueil                                                             */
+  /* ------------------------------------------------------------------ */
+  #home { padding-top: 8vh; text-align: center; }
+
+  .marque {
+    font-family: "Space Mono", monospace; font-size: 13px;
+    letter-spacing: .25em; color: var(--faisceau); text-transform: uppercase;
+  }
+
+  #home h1 { font-size: clamp(34px, 8vw, 56px); margin: 18px 0 12px; }
+  #home .sous-titre { color: var(--brume); max-width: 46ch; margin: 0 auto 36px; }
+
+  .actions { display: flex; flex-direction: column; gap: 14px; max-width: 360px; margin: 0 auto; }
+  .actions .ou { color: var(--brume); font-size: 14px; }
+  .rejoindre { display: flex; gap: 10px; }
+  .rejoindre input { text-transform: uppercase; font-family: "Space Mono", monospace; letter-spacing: .15em; }
+
+  .comment {
+    margin: 56px auto 0; max-width: 420px; text-align: left;
+    color: var(--brume); font-size: 15px;
+    border-top: 1px solid var(--loge-2); padding-top: 24px;
+  }
+  .comment p { margin-bottom: 10px; }
+  .comment strong { color: var(--ecran); font-weight: 600; }
+
+  /* ------------------------------------------------------------------ */
+  /* Le ticket (signature) : le lien de la salle                         */
+  /* ------------------------------------------------------------------ */
+  .ticket {
+    display: flex; align-items: stretch; margin-bottom: 16px;
+    background: var(--loge); border-radius: var(--rayon);
+    overflow: hidden; border: 1px solid var(--loge-2);
+  }
+  .ticket .talon {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 12px 14px; flex: 1; min-width: 0;
+    border-right: 2px dashed var(--nuit); /* perforation */
+  }
+  .ticket .talon .etiquette {
+    font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--brume);
+  }
+  .ticket .talon .code {
+    font-family: "Space Mono", monospace; font-size: 22px;
+    color: var(--faisceau); letter-spacing: .18em;
+  }
+  .ticket .talon .admet { font-size: 12px; color: var(--brume); }
+  .ticket .actions-ticket {
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+    padding: 10px 12px;
+  }
+  .ticket .actions-ticket button { padding: 8px 12px; font-size: 14px; border-radius: 10px; }
+
+  .presence { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--brume); margin-bottom: 14px; }
+  .presence .point {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--brume);
+  }
+  .presence.ensemble .point { background: var(--velours); box-shadow: 0 0 10px var(--velours); }
+  .presence.ensemble { color: var(--ecran); }
+
+  /* ------------------------------------------------------------------ */
+  /* L'écran                                                             */
+  /* ------------------------------------------------------------------ */
+  .salle-ecran {
+    position: relative; background: #000;
+    border-radius: var(--rayon); overflow: hidden;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--loge-2);
+  }
+  .salle-ecran video { width: 100%; height: 100%; display: block; background: #000; }
+
+  .vide, .voile-lecture {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; text-align: center;
+    padding: 20px;
+  }
+  .vide {
+    background:
+      radial-gradient(ellipse 90% 65% at 50% 110%, rgba(255,197,92,.16), transparent 65%),
+      #05060f;
+    color: var(--brume);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .vide::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse 90% 65% at 50% 110%, rgba(255,197,92,.10), transparent 65%);
+      animation: faisceau 4.5s ease-in-out infinite alternate;
+    }
+    @keyframes faisceau { from { opacity: .3; } to { opacity: 1; } }
+  }
+  .vide .titre-vide { font-family: "Fraunces", serif; font-size: 20px; color: var(--ecran); }
+
+  .voile-lecture { background: rgba(5,6,15,.72); }
+  .voile-lecture button { font-size: 17px; }
+
+  .maintenant {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 12px 0 22px; min-height: 24px;
+  }
+  .maintenant .titre-video {
+    font-size: 14px; color: var(--brume);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .maintenant button { font-size: 13px; padding: 8px 12px; border-radius: 10px; flex-shrink: 0; }
+
+  /* ------------------------------------------------------------------ */
+  /* Sources                                                             */
+  /* ------------------------------------------------------------------ */
+  .sources h2 { font-size: 20px; margin-bottom: 4px; }
+  .sources > p { color: var(--brume); font-size: 14px; margin-bottom: 14px; }
+
+  details {
+    background: var(--loge); border: 1px solid var(--loge-2);
+    border-radius: var(--rayon); margin-bottom: 10px;
+  }
+  summary {
+    list-style: none; cursor: pointer; padding: 14px 16px;
+    font-weight: 600; display: flex; align-items: center; gap: 10px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary .puce { color: var(--faisceau); }
+  details .contenu { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+  details .aide { font-size: 13px; color: var(--brume); }
+
+  .ligne { display: flex; gap: 10px; }
+  .ligne input { flex: 1; }
+
+  .resultats { display: flex; flex-direction: column; gap: 8px; }
+  .resultat {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--nuit); border: 1px solid var(--loge-2);
+    border-radius: 10px; padding: 10px 12px; font-size: 14px;
+  }
+  .resultat .url { color: var(--brume); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .resultat button { padding: 7px 12px; font-size: 13px; border-radius: 8px; flex-shrink: 0; }
+
+  progress { width: 100%; accent-color: var(--faisceau); }
+
+  .message { font-size: 14px; color: var(--velours); }
+  .message.ok { color: var(--faisceau); }
+
+  .note-bas {
+    margin-top: 28px; font-size: 13px; color: var(--brume);
+    border-top: 1px solid var(--loge-2); padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ================= ACCUEIL ================= -->
+  <section id="home" class="cache">
+    <div class="marque">Watch Ensemble</div>
+    <h1>Une salle de cinéma<br>pour vous deux.</h1>
+    <p class="sous-titre">
+      Crée une salle, envoie le lien, et regardez la même vidéo au même
+      moment — lecture, pause et avance synchronisées. Rien à installer.
+    </p>
+
+    <div class="actions">
+      <button class="primaire" id="btn-creer">Créer une salle</button>
+      <span class="ou">ou rejoindre avec un code</span>
+      <div class="rejoindre">
+        <input type="text" id="champ-code" placeholder="EX : K7M2QF" maxlength="12"
+               autocapitalize="characters" autocomplete="off" spellcheck="false"
+               aria-label="Code de la salle">
+        <button id="btn-rejoindre">Entrer</button>
+      </div>
+    </div>
+
+    <div class="comment">
+      <p><strong>1.</strong> Crée la salle et partage le lien (par iMessage, pendant votre FaceTime…).</p>
+      <p><strong>2.</strong> Choisis une vidéo : une URL directe, une vidéo trouvée sur une page, ou un fichier de ton téléphone.</p>
+      <p><strong>3.</strong> Quand l'un de vous met lecture, pause ou avance, l'autre suit automatiquement.</p>
+    </div>
+  </section>
+
+  <!-- ================= SALLE ================= -->
+  <section id="room" class="cache">
+
+    <div class="ticket" aria-label="Ticket de la salle">
+      <div class="talon">
+        <span class="etiquette">Salle</span>
+        <span class="code" id="aff-code">------</span>
+        <span class="admet">Admet 2 personnes · séance privée</span>
+      </div>
+      <div class="actions-ticket">
+        <button id="btn-copier">Copier le lien</button>
+        <button id="btn-partager">Partager</button>
+      </div>
+    </div>
+
+    <div class="presence" id="presence">
+      <span class="point"></span>
+      <span id="presence-texte">Connexion…</span>
+    </div>
+
+    <div class="salle-ecran">
+      <video id="video" controls playsinline preload="metadata"></video>
+
+      <div class="vide" id="ecran-vide">
+        <div class="titre-vide">L'écran est encore éteint</div>
+        <div>Choisis une vidéo ci-dessous pour lancer la séance.</div>
+      </div>
+
+      <div class="voile-lecture cache" id="voile-lecture">
+        <button class="primaire" id="btn-lancer">▶&nbsp; Rejoindre la lecture</button>
+        <div class="aide">Safari demande un geste pour démarrer la vidéo.</div>
+      </div>
+    </div>
+
+    <div class="maintenant">
+      <span class="titre-video" id="titre-video"></span>
+      <button id="btn-resync" title="Se recaler sur la position de l'autre">Resynchroniser</button>
+    </div>
+
+    <div class="sources">
+      <h2>Choisir une vidéo</h2>
+      <p>La vidéo choisie se charge chez vous deux en même temps.</p>
+
+      <details open>
+        <summary><span class="puce">◆</span> Coller l'adresse d'une vidéo</summary>
+        <div class="contenu">
+          <div class="aide">Une URL directe : fichier MP4/WebM ou flux HLS (.m3u8).</div>
+          <div class="ligne">
+            <input type="url" id="champ-url" placeholder="https://…/video.mp4" inputmode="url">
+            <button class="primaire" id="btn-charger-url">Charger</button>
+          </div>
+          <div class="message" id="msg-url"></div>
+        </div>
+      </details>
+
+      <details>
+        <summary><span class="puce">◆</span> Trouver la vidéo d'une page web</summary>
+        <div class="contenu">
+          <div class="aide">
+            Colle l'adresse d'une page contenant un lecteur vidéo : on cherche
+            les sources lisibles (MP4, WebM, HLS) dans la page.
+          </div>
+          <div class="ligne">
+            <input type="url" id="champ-page" placeholder="https://exemple.com/article-avec-video" inputmode="url">
+            <button id="btn-extraire">Chercher</button>
+          </div>
+          <div class="message" id="msg-extraire"></div>
+          <div class="resultats" id="resultats-extraction"></div>
+        </div>
+      </details>
+
+      <details>
+        <summary><span class="puce">◆</span> Envoyer un fichier de ton appareil</summary>
+        <div class="contenu">
+          <div class="aide">
+            Le fichier (MP4, MOV, M4V, WebM) est envoyé sur votre serveur puis
+            lu par vous deux. Selon la taille et ta connexion, l'envoi peut
+            prendre un moment.
+          </div>
+          <input type="file" id="champ-fichier" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,.webm">
+          <progress id="barre-upload" max="100" value="0" class="cache"></progress>
+          <div class="message" id="msg-upload"></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="note-bas">
+      Les vidéos protégées (plateformes de streaming) et les sources
+      « blob: » (YouTube…) ne sont pas lisibles ici — c'est une limite
+      technique des navigateurs, pas de la salle.
+    </div>
+  </section>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // =========================================================================
+  // Routage minimal : / -> accueil, /room/CODE -> salle
+  // =========================================================================
+  var match = location.pathname.match(/^\/room\/([A-Za-z0-9]{4,16})$/);
+  if (match) {
+    document.getElementById("room").classList.remove("cache");
+    initRoom(match[1].toUpperCase());
+  } else {
+    document.getElementById("home").classList.remove("cache");
+    initHome();
+  }
+
+  function $(id) { return document.getElementById(id); }
+
+  // =========================================================================
+  // Accueil
+  // =========================================================================
+  function initHome() {
+    $("btn-creer").addEventListener("click", function () {
+      var alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // sans O/0, I/1, L
+      var code = "";
+      for (var i = 0; i < 6; i++) {
+        code += alphabet[Math.floor(Math.random() * alphabet.length)];
+      }
+      location.href = "/room/" + code;
+    });
+
+    function rejoindre() {
+      var code = $("champ-code").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (code.length >= 4) location.href = "/room/" + code;
+    }
+    $("btn-rejoindre").addEventListener("click", rejoindre);
+    $("champ-code").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") rejoindre();
+    });
+  }
+
+  // =========================================================================
+  // Salle
+  // =========================================================================
+  function initRoom(code) {
+    var video = $("video");
+    var ws = null;
+    var hls = null;
+    var currentUrl = null;
+    var suppressUntil = 0;   // fenêtre pendant laquelle on ignore nos propres
+                             // événements (ils viennent d'une action distante)
+    var pendingSeekTo = null;
+
+    $("aff-code").textContent = code;
+    document.title = "Salle " + code + " — Watch Ensemble";
+
+    // ------------------------- Ticket : copier / partager -----------------
+    $("btn-copier").addEventListener("click", function () {
+      var lien = location.href;
+      (navigator.clipboard ? navigator.clipboard.writeText(lien) : Promise.reject())
+        .then(function () { flash($("btn-copier"), "Copié !"); })
+        .catch(function () { prompt("Copie ce lien :", lien); });
+    });
+
+    $("btn-partager").addEventListener("click", function () {
+      if (navigator.share) {
+        navigator.share({
+          title: "Notre salle Watch Ensemble",
+          text: "Rejoins-moi pour regarder une vidéo ensemble 🎬",
+          url: location.href
+        }).catch(function () {});
+      } else {
+        $("btn-copier").click();
+      }
+    });
+
+    function flash(btn, texte) {
+      var avant = btn.textContent;
+      btn.textContent = texte;
+      setTimeout(function () { btn.textContent = avant; }, 1500);
+    }
+
+    // ------------------------- WebSocket ----------------------------------
+    function connect() {
+      var proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(proto + "://" + location.host + "/ws");
+
+      ws.onopen = function () {
+        ws.send(JSON.stringify({ type: "join", room: code }));
+      };
+      ws.onmessage = function (e) {
+        var msg;
+        try { msg = JSON.parse(e.data); } catch (err) { return; }
+        if (msg.type === "state") applyState(msg.state);
+        else if (msg.type === "action") applyAction(msg.action);
+        else if (msg.type === "peers") updatePeers(msg.count);
+      };
+      ws.onclose = function () {
+        setPresence(false, "Reconnexion…");
+        setTimeout(connect, 1500);
+      };
+    }
+    connect();
+
+    function send(action) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "action", action: action }));
+      }
+    }
+
+    function updatePeers(count) {
+      if (count >= 2) setPresence(true, "Vous êtes ensemble dans la salle");
+      else setPresence(false, "En attente de l'autre… envoie-lui le ticket !");
+    }
+    function setPresence(ensemble, texte) {
+      $("presence").classList.toggle("ensemble", ensemble);
+      $("presence-texte").textContent = texte;
+    }
+
+    // ------------------------- Chargement d'une source --------------------
+    function loadSource(url, title) {
+      if (hls) { hls.destroy(); hls = null; }
+      currentUrl = url;
+
+      var estHls = /\.m3u8(\?|$)/i.test(url);
+      var hlsNatif = video.canPlayType("application/vnd.apple.mpegurl");
+
+      if (estHls && !hlsNatif && window.Hls && Hls.isSupported()) {
+        hls = new Hls();
+        hls.loadSource(url);
+        hls.attachMedia(video);
+      } else {
+        video.src = url;
+      }
+
+      $("titre-video").textContent = title || url;
+      $("ecran-vide").classList.add("cache");
+    }
+
+    // ------------------------- Synchronisation ----------------------------
+    function guard(fn) {
+      suppressUntil = Date.now() + 1500;
+      fn();
+    }
+    function suppressed() { return Date.now() < suppressUntil; }
+
+    function maybeSeek(t, tolerance) {
+      if (typeof tolerance !== "number") tolerance = 1.2;
+      if (isFinite(t) && Math.abs((video.currentTime || 0) - t) > tolerance) {
+        video.currentTime = t;
+      }
+    }
+
+    function tryPlay() {
+      var p = video.play();
+      if (p && p.catch) {
+        p.catch(function () {
+          // Safari exige un geste : on affiche le voile "Rejoindre la lecture"
+          $("voile-lecture").classList.remove("cache");
+        });
+      }
+    }
+
+    $("btn-lancer").addEventListener("click", function () {
+      $("voile-lecture").classList.add("cache");
+      guard(function () {
+        if (pendingSeekTo !== null) { maybeSeek(pendingSeekTo, 0.3); pendingSeekTo = null; }
+        video.play().catch(function () {});
+      });
+    });
+
+    function applyState(state) {
+      if (!state.url) { $("ecran-vide").classList.remove("cache"); return; }
+
+      var mustLoad = state.url !== currentUrl;
+      guard(function () {
+        if (mustLoad) loadSource(state.url, state.title);
+      });
+
+      var caler = function () {
+        guard(function () {
+          maybeSeek(state.time, 0.3);
+          if (state.playing) { pendingSeekTo = state.time; tryPlay(); }
+          else video.pause();
+        });
+      };
+
+      if (mustLoad) {
+        video.addEventListener("loadedmetadata", caler, { once: true });
+      } else {
+        caler();
+      }
+    }
+
+    function applyAction(a) {
+      guard(function () {
+        switch (a.kind) {
+          case "load":
+            loadSource(a.url, a.title);
+            video.pause();
+            break;
+          case "play":
+            maybeSeek(a.time);
+            pendingSeekTo = a.time;
+            tryPlay();
+            break;
+          case "pause":
+            maybeSeek(a.time, 0.3);
+            video.pause();
+            break;
+          case "seek":
+            maybeSeek(a.time, 0.3);
+            if (a.playing) tryPlay();
+            break;
+        }
+      });
+    }
+
+    // Nos propres interactions -> envoyées à l'autre
+    video.addEventListener("play", function () {
+      if (suppressed()) return;
+      send({ kind: "play", time: video.currentTime });
+    });
+    video.addEventListener("pause", function () {
+      if (suppressed() || video.seeking || video.ended) return;
+      send({ kind: "pause", time: video.currentTime });
+    });
+    video.addEventListener("seeked", function () {
+      if (suppressed()) return;
+      send({ kind: "seek", time: video.currentTime, playing: !video.paused });
+    });
+
+    $("btn-resync").addEventListener("click", function () {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "requestState" }));
+        flash($("btn-resync"), "Recalage…");
+      }
+    });
+
+    // ------------------------- Source 1 : URL directe ---------------------
+    $("btn-charger-url").addEventListener("click", function () {
+      var url = $("champ-url").value.trim();
+      var msg = $("msg-url");
+      msg.textContent = "";
+      if (!/^https?:\/\//i.test(url)) {
+        msg.textContent = "Entre une adresse complète commençant par https://";
+        return;
+      }
+      chargerPourTous(url, nomDepuisURL(url));
+      msg.className = "message ok";
+      msg.textContent = "Chargée pour vous deux ✓";
+    });
+
+    // ------------------------- Source 2 : extraction ----------------------
+    $("btn-extraire").addEventListener("click", function () {
+      var pageURL = $("champ-page").value.trim();
+      var msg = $("msg-extraire");
+      var zone = $("resultats-extraction");
+      zone.innerHTML = "";
+      msg.className = "message";
+      if (!/^https?:\/\//i.test(pageURL)) {
+        msg.textContent = "Entre l'adresse complète de la page.";
+        return;
+      }
+      msg.textContent = "Recherche en cours…";
+
+      fetch("/api/extract?url=" + encodeURIComponent(pageURL))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { msg.textContent = data.error; return; }
+          if (!data.videos || data.videos.length === 0) {
+            msg.textContent =
+              "Aucune vidéo lisible trouvée sur cette page (lecteur protégé ou source « blob: »).";
+            return;
+          }
+          msg.className = "message ok";
+          msg.textContent = data.videos.length + " source(s) trouvée(s) :";
+          data.videos.forEach(function (v) {
+            var ligne = document.createElement("div");
+            ligne.className = "resultat";
+            var span = document.createElement("span");
+            span.className = "url";
+            span.textContent = v.kind + " · " + v.url;
+            var btn = document.createElement("button");
+            btn.className = "primaire";
+            btn.textContent = "Regarder";
+            btn.addEventListener("click", function () {
+              chargerPourTous(v.url, nomDepuisURL(v.url));
+            });
+            ligne.appendChild(span);
+            ligne.appendChild(btn);
+            zone.appendChild(ligne);
+          });
+        })
+        .catch(function () {
+          msg.textContent = "La recherche a échoué. Réessaie ou utilise une autre source.";
+        });
+    });
+
+    // ------------------------- Source 3 : fichier local -------------------
+    $("champ-fichier").addEventListener("change", function () {
+      var fichier = this.files && this.files[0];
+      if (!fichier) return;
+      var barre = $("barre-upload");
+      var msg = $("msg-upload");
+      msg.className = "message";
+      msg.textContent = "Envoi de « " + fichier.name + " »…";
+      barre.classList.remove("cache");
+      barre.value = 0;
+
+      var form = new FormData();
+      form.append("video", fichier);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/upload");
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) barre.value = Math.round((e.loaded / e.total) * 100);
+      };
+      xhr.onload = function () {
+        barre.classList.add("cache");
+        var data;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+        if (xhr.status === 200 && data.url) {
+          msg.className = "message ok";
+          msg.textContent = "Fichier prêt — lecture chez vous deux ✓";
+          chargerPourTous(data.url, data.title);
+        } else {
+          msg.textContent = data.error || "L'envoi a échoué.";
+        }
+      };
+      xhr.onerror = function () {
+        barre.classList.add("cache");
+        msg.textContent = "L'envoi a échoué (connexion interrompue).";
+      };
+      xhr.send(form);
+    });
+
+    // ------------------------- Utilitaires --------------------------------
+    function chargerPourTous(url, title) {
+      guard(function () { loadSource(url, title); });
+      send({ kind: "load", url: url, title: title });
+    }
+
+    function nomDepuisURL(url) {
+      try {
+        var u = new URL(url, location.href);
+        var dernier = decodeURIComponent(u.pathname.split("/").pop() || "");
+        return dernier || u.hostname;
+      } catch (e) { return url; }
+    }
+  }
+})();
+</script>
+</body>
+</html>
