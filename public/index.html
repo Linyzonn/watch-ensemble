@@ -199,6 +199,38 @@
   .message { font-size: 14px; color: var(--velours); }
   .message.ok { color: var(--faisceau); }
 
+  /* ------------------------------------------------------------------ */
+  /* Appel vidéo                                                         */
+  /* ------------------------------------------------------------------ */
+  .appel {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--loge); border: 1px solid var(--loge-2);
+    border-radius: var(--rayon); padding: 10px 12px; margin-bottom: 16px;
+  }
+  .appel .titre-appel { font-size: 14px; color: var(--brume); margin-right: auto; }
+  .appel button { padding: 9px 14px; font-size: 14px; border-radius: 10px; }
+  .appel button.danger { background: #4d2333; color: var(--velours); }
+  .appel button.actif-off { background: var(--nuit); color: var(--brume); border: 1px solid var(--loge-2); }
+  .appel .sonne { color: var(--velours); font-weight: 600; font-size: 14px; }
+
+  /* Bulles vidéo flottantes : visibles par-dessus le film, déplaçables du regard */
+  #visios {
+    position: fixed; right: 14px; bottom: 14px; z-index: 50;
+    display: none; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  #visios.actif { display: flex; }
+  #visio-distante {
+    width: min(220px, 42vw); aspect-ratio: 4 / 3; object-fit: cover;
+    background: #05060f; border-radius: 14px;
+    border: 1px solid var(--loge-2); box-shadow: 0 10px 30px rgba(0,0,0,.55);
+  }
+  #visio-locale {
+    width: min(96px, 20vw); aspect-ratio: 4 / 3; object-fit: cover;
+    background: #05060f; border-radius: 10px;
+    border: 1px solid var(--loge-2);
+    transform: scaleX(-1); /* effet miroir, comme FaceTime */
+  }
+
   .note-bas {
     margin-top: 28px; font-size: 13px; color: var(--brume);
     border-top: 1px solid var(--loge-2); padding-top: 16px;
@@ -275,6 +307,17 @@
       <button id="btn-resync" title="Se recaler sur la position de l'autre">Resynchroniser</button>
     </div>
 
+    <!-- ================= APPEL VIDÉO ================= -->
+    <div class="appel" id="appel">
+      <span class="titre-appel" id="appel-etat">Appel vidéo : discutez en vous regardant, par-dessus le film.</span>
+      <span class="sonne cache" id="appel-sonne">📞 Ton/ta partenaire t'appelle…</span>
+      <button class="primaire cache" id="btn-repondre">Rejoindre l'appel</button>
+      <button class="primaire" id="btn-appeler">🎥 Démarrer l'appel</button>
+      <button class="cache" id="btn-micro" title="Couper / réactiver le micro">🎙️ Micro</button>
+      <button class="cache" id="btn-camera" title="Couper / réactiver la caméra">📷 Caméra</button>
+      <button class="danger cache" id="btn-raccrocher">Raccrocher</button>
+    </div>
+
     <div class="sources">
       <h2>Choisir une vidéo</h2>
       <p>La vidéo choisie se charge chez vous deux en même temps.</p>
@@ -329,6 +372,12 @@
     </div>
   </section>
 
+</div>
+
+<!-- Bulles vidéo de l'appel (flottantes, par-dessus la page) -->
+<div id="visios">
+  <video id="visio-distante" autoplay playsinline></video>
+  <video id="visio-locale" autoplay playsinline muted></video>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
@@ -428,6 +477,7 @@
         if (msg.type === "state") applyState(msg.state);
         else if (msg.type === "action") applyAction(msg.action);
         else if (msg.type === "peers") updatePeers(msg.count);
+        else if (msg.type === "rtc") handleRtc(msg.payload);
       };
       ws.onclose = function () {
         setPresence(false, "Reconnexion…");
@@ -445,6 +495,10 @@
     function updatePeers(count) {
       if (count >= 2) setPresence(true, "Vous êtes ensemble dans la salle");
       else setPresence(false, "En attente de l'autre… envoie-lui le ticket !");
+      // Si l'autre quitte la salle en plein appel, on raccroche proprement.
+      if (count < 2 && callState !== "idle") {
+        endCall(false, "L'autre a quitté la salle — appel terminé.");
+      }
     }
     function setPresence(ensemble, texte) {
       $("presence").classList.toggle("ensemble", ensemble);
@@ -668,6 +722,202 @@
       };
       xhr.send(form);
     });
+
+    // ------------------------- Appel vidéo (WebRTC) -----------------------
+    // Le serveur relaie la signalisation (offre/réponse/candidats) via le
+    // WebSocket de la salle ; le flux audio/vidéo passe ensuite directement
+    // entre vos deux appareils (pair-à-pair). Les serveurs STUN/TURN publics
+    // ci-dessous aident la connexion à s'établir derrière les box internet.
+    var ICE = {
+      iceServers: [
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+        {
+          urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
+                 "turns:openrelay.metered.ca:443?transport=tcp"],
+          username: "openrelayproject", credential: "openrelayproject"
+        }
+      ]
+    };
+
+    var pc = null;              // RTCPeerConnection en cours
+    var localStream = null;     // caméra + micro locaux
+    var callState = "idle";     // idle | calling | ringing | live
+    var pendingOffer = null;    // offre reçue en attente d'acceptation
+    var iceQueue = [];          // candidats reçus avant la description distante
+
+    function sendRtc(payload) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "rtc", payload: payload }));
+      }
+    }
+
+    function setCallUI() {
+      var live = callState === "live" || callState === "calling";
+      $("btn-appeler").classList.toggle("cache", callState !== "idle");
+      $("btn-raccrocher").classList.toggle("cache", !live);
+      $("btn-micro").classList.toggle("cache", !live);
+      $("btn-camera").classList.toggle("cache", !live);
+      $("appel-sonne").classList.toggle("cache", callState !== "ringing");
+      $("btn-repondre").classList.toggle("cache", callState !== "ringing");
+      $("visios").classList.toggle("actif", live);
+      if (callState === "idle") {
+        $("appel-etat").textContent = "Appel vidéo : discutez en vous regardant, par-dessus le film.";
+      } else if (callState === "calling") {
+        $("appel-etat").textContent = "Appel en cours… en attente de l'autre.";
+      } else if (callState === "live") {
+        $("appel-etat").textContent = "En appel 💛";
+      } else {
+        $("appel-etat").textContent = "";
+      }
+    }
+
+    function getMedia() {
+      return navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+        audio: { echoCancellation: true, noiseSuppression: true }
+      });
+    }
+
+    function createPC() {
+      var conn = new RTCPeerConnection(ICE);
+      conn.onicecandidate = function (e) {
+        if (e.candidate) sendRtc({ kind: "ice", candidate: e.candidate });
+      };
+      conn.ontrack = function (e) {
+        $("visio-distante").srcObject = e.streams[0];
+        callState = "live";
+        setCallUI();
+      };
+      conn.onconnectionstatechange = function () {
+        if (conn.connectionState === "failed") {
+          endCall(true, "La connexion de l'appel a échoué (réseau trop restrictif). " +
+                        "Vous pouvez utiliser FaceTime/WhatsApp en parallèle du film.");
+        }
+      };
+      return conn;
+    }
+
+    function flushIceQueue() {
+      while (iceQueue.length) {
+        var c = iceQueue.shift();
+        pc.addIceCandidate(new RTCIceCandidate(c)).catch(function () {});
+      }
+    }
+
+    // Démarrer un appel (côté appelant)
+    $("btn-appeler").addEventListener("click", function () {
+      if (callState !== "idle") return;
+      callState = "calling";
+      setCallUI();
+      getMedia().then(function (stream) {
+        localStream = stream;
+        $("visio-locale").srcObject = stream;
+        pc = createPC();
+        stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
+        return pc.createOffer();
+      }).then(function (offer) {
+        return pc.setLocalDescription(offer);
+      }).then(function () {
+        sendRtc({ kind: "offer", sdp: pc.localDescription });
+      }).catch(function (err) {
+        endCall(false, "Impossible d'accéder à la caméra/au micro (" + err.name + "). " +
+                       "Vérifie les autorisations du navigateur.");
+      });
+    });
+
+    // Répondre (côté appelé)
+    $("btn-repondre").addEventListener("click", function () {
+      if (!pendingOffer) return;
+      var offer = pendingOffer;
+      pendingOffer = null;
+      getMedia().then(function (stream) {
+        localStream = stream;
+        $("visio-locale").srcObject = stream;
+        pc = createPC();
+        stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
+        return pc.setRemoteDescription(new RTCSessionDescription(offer));
+      }).then(function () {
+        flushIceQueue();
+        return pc.createAnswer();
+      }).then(function (answer) {
+        return pc.setLocalDescription(answer);
+      }).then(function () {
+        sendRtc({ kind: "answer", sdp: pc.localDescription });
+        callState = "live";
+        setCallUI();
+      }).catch(function (err) {
+        sendRtc({ kind: "bye" });
+        endCall(false, "Impossible de rejoindre l'appel (" + err.name + ").");
+      });
+    });
+
+    function handleRtc(p) {
+      if (!p || !p.kind) return;
+      if (p.kind === "offer") {
+        pendingOffer = p.sdp;
+        iceQueue = [];
+        callState = "ringing";
+        setCallUI();
+      } else if (p.kind === "answer") {
+        if (pc) {
+          pc.setRemoteDescription(new RTCSessionDescription(p.sdp))
+            .then(flushIceQueue)
+            .catch(function () {});
+        }
+      } else if (p.kind === "ice") {
+        if (pc && pc.remoteDescription) {
+          pc.addIceCandidate(new RTCIceCandidate(p.candidate)).catch(function () {});
+        } else {
+          iceQueue.push(p.candidate);
+        }
+      } else if (p.kind === "bye") {
+        endCall(false, "L'autre a raccroché.");
+      }
+    }
+
+    // Micro / caméra : coupe la piste sans raccrocher
+    $("btn-micro").addEventListener("click", function () {
+      if (!localStream) return;
+      var on = false;
+      localStream.getAudioTracks().forEach(function (t) { t.enabled = !t.enabled; on = t.enabled; });
+      this.classList.toggle("actif-off", !on);
+      this.textContent = on ? "🎙️ Micro" : "🔇 Micro coupé";
+    });
+    $("btn-camera").addEventListener("click", function () {
+      if (!localStream) return;
+      var on = false;
+      localStream.getVideoTracks().forEach(function (t) { t.enabled = !t.enabled; on = t.enabled; });
+      this.classList.toggle("actif-off", !on);
+      this.textContent = on ? "📷 Caméra" : "🚫 Caméra coupée";
+    });
+
+    $("btn-raccrocher").addEventListener("click", function () {
+      sendRtc({ kind: "bye" });
+      endCall(false, "Appel terminé.");
+    });
+
+    function endCall(silentToPeer, message) {
+      if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+      if (localStream) {
+        localStream.getTracks().forEach(function (t) { t.stop(); });
+        localStream = null;
+      }
+      $("visio-locale").srcObject = null;
+      $("visio-distante").srcObject = null;
+      pendingOffer = null;
+      iceQueue = [];
+      callState = "idle";
+      setCallUI();
+      if (message) {
+        $("appel-etat").textContent = message;
+        setTimeout(setCallUI, 6000);
+      }
+      // Boutons micro/caméra remis à l'état par défaut
+      $("btn-micro").textContent = "🎙️ Micro"; $("btn-micro").classList.remove("actif-off");
+      $("btn-camera").textContent = "📷 Caméra"; $("btn-camera").classList.remove("actif-off");
+    }
+
+    setCallUI();
 
     // ------------------------- Utilitaires --------------------------------
     function chargerPourTous(url, title) {

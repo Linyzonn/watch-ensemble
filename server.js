@@ -223,6 +223,14 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // Signalisation WebRTC (appel vidéo) : le serveur relaie simplement les
+    // messages entre les deux personnes de la salle, sans les interpréter.
+    // Le flux audio/vidéo lui-même passe ensuite en pair-à-pair.
+    if (msg.type === "rtc" && msg.payload) {
+      broadcast(ws.roomId, { type: "rtc", payload: msg.payload }, ws);
+      return;
+    }
+
     if (msg.type === "action" && msg.action) {
       const a = msg.action;
       const s = room.state;
