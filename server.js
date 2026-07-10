@@ -5,6 +5,8 @@ const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const dns = require("node:dns").promises;
+const net = require("node:net");
 const express = require("express");
 const multer = require("multer");
 const { WebSocketServer, WebSocket } = require("ws");
@@ -17,6 +19,84 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 app.disable("x-powered-by");
+// Render (et la plupart des hébergeurs) placent l'app derrière un proxy :
+// nécessaire pour que req.ip reflète la vraie IP cliente (rate-limiting).
+app.set("trust proxy", true);
+
+// ---------------------------------------------------------------------------
+// Anti-SSRF : refuse toute cible qui résout vers une adresse interne.
+// (Protège /api/extract : sans ça, un visiteur pourrait faire lire au serveur
+//  http://169.254.169.254/… — métadonnées cloud — ou des services internes.)
+// Limite connue : petite fenêtre TOCTOU entre la résolution DNS et la requête ;
+// suffisant contre les abus courants, pas contre un attaquant très déterminé.
+// ---------------------------------------------------------------------------
+function isPrivateIPv4(ip) {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return true;
+  const [a, b] = p;
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;          // link-local
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+  if (a === 192 && b === 168) return true;          // 192.168/16
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+  if (a >= 224) return true;                         // multicast / réservé
+  return false;
+}
+function isPrivateIP(ip) {
+  if (net.isIPv4(ip)) return isPrivateIPv4(ip);
+  if (net.isIPv6(ip)) {
+    const low = ip.toLowerCase();
+    if (low === "::1" || low === "::") return true;
+    if (low.startsWith("fe80")) return true;              // link-local
+    if (low.startsWith("fc") || low.startsWith("fd")) return true; // ULA fc00::/7
+    const m = low.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);  // IPv4-mappé
+    if (m) return isPrivateIPv4(m[1]);
+    return false;
+  }
+  return true; // format inconnu -> refus
+}
+async function assertPublicHost(urlStr) {
+  let u;
+  try { u = new URL(urlStr); } catch { throw new Error("URL invalide."); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error("Seul http/https est autorisé.");
+  const host = u.hostname;
+  if (net.isIP(host)) {
+    if (isPrivateIP(host)) throw new Error("Adresse réseau interne refusée.");
+    return u;
+  }
+  if (/^(localhost|.*\.local)$/i.test(host)) throw new Error("Nom d'hôte local refusé.");
+  let addrs;
+  try { addrs = await dns.lookup(host, { all: true }); }
+  catch { throw new Error("Nom d'hôte introuvable."); }
+  if (!addrs.length) throw new Error("Nom d'hôte introuvable.");
+  for (const a of addrs) {
+    if (isPrivateIP(a.address)) throw new Error("Ce nom pointe vers une adresse interne (refusé).");
+  }
+  return u;
+}
+
+// ---------------------------------------------------------------------------
+// Rate-limiting mémoire (léger, sans dépendance) : borne les endpoints
+// publics coûteux (upload, extraction) pour éviter les abus.
+// ---------------------------------------------------------------------------
+const rlHits = new Map();
+function rateLimit(max, windowMs) {
+  return (req, res, next) => {
+    const ip = req.ip || (req.socket && req.socket.remoteAddress) || "?";
+    const now = Date.now();
+    let rec = rlHits.get(ip);
+    if (!rec || now > rec.reset) { rec = { count: 0, reset: now + windowMs }; rlHits.set(ip, rec); }
+    rec.count++;
+    if (rec.count > max) {
+      return res.status(429).json({ error: "Trop de requêtes, réessaie dans un instant." });
+    }
+    next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of rlHits) if (now > rec.reset) rlHits.delete(ip);
+}, 5 * 60 * 1000).unref();
 
 // ---------------------------------------------------------------------------
 // Fichiers statiques
@@ -54,7 +134,7 @@ const upload = multer({
   },
 });
 
-app.post("/api/upload", (req, res) => {
+app.post("/api/upload", rateLimit(20, 60_000), (req, res) => {
   upload.single("video")(req, res, (err) => {
     if (err) {
       const msg =
@@ -77,17 +157,15 @@ app.post("/api/upload", (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Extraction de vidéos depuis une page web
-// (équivalent de la "reconnaissance des vidéos" : on cherche les sources
-// directes MP4/WebM/HLS dans le HTML de la page)
+// (on cherche les sources directes MP4/WebM/HLS/DASH dans le HTML de la page)
 // ---------------------------------------------------------------------------
-app.get("/api/extract", async (req, res) => {
+app.get("/api/extract", rateLimit(30, 60_000), async (req, res) => {
   const pageURL = String(req.query.url || "");
   let base;
   try {
-    base = new URL(pageURL);
-    if (!/^https?:$/.test(base.protocol)) throw new Error("bad protocol");
-  } catch {
-    return res.status(400).json({ error: "URL de page invalide." });
+    base = await assertPublicHost(pageURL); // valide protocole + refuse cibles internes
+  } catch (e) {
+    return res.status(400).json({ error: e.message || "URL de page invalide." });
   }
 
   try {
@@ -109,7 +187,7 @@ app.get("/api/extract", async (req, res) => {
 
     // 1) URLs directes vers des fichiers/flux vidéo dans le HTML
     const directRe =
-      /https?:\/\/[^\s"'<>\\]+?\.(?:mp4|m4v|webm|mov|m3u8)(?:\?[^\s"'<>\\]*)?/gi;
+      /https?:\/\/[^\s"'<>\\]+?\.(?:mp4|m4v|webm|mov|m3u8|mpd)(?:\?[^\s"'<>\\]*)?/gi;
     for (const m of html.matchAll(directRe)) {
       addCandidate(found, m[0], base);
     }
@@ -122,7 +200,9 @@ app.get("/api/extract", async (req, res) => {
 
     const videos = [...found.keys()].slice(0, 10).map((u) => ({
       url: u,
-      kind: /\.m3u8(\?|$)/i.test(u) ? "Flux HLS" : "Fichier vidéo",
+      kind: /\.m3u8(\?|$)/i.test(u) ? "Flux HLS"
+          : /\.mpd(\?|$)/i.test(u) ? "Flux DASH"
+          : "Fichier vidéo",
     }));
 
     res.json({ videos });
@@ -138,7 +218,7 @@ function addCandidate(map, raw, base) {
   try {
     const u = new URL(raw, base).href;
     if (u.startsWith("blob:")) return; // illisible hors de la page d'origine
-    if (!/\.(mp4|m4v|webm|mov|m3u8)(\?|$)/i.test(u)) return;
+    if (!/\.(mp4|m4v|webm|mov|m3u8|mpd)(\?|$)/i.test(u)) return;
     if (!map.has(u)) map.set(u, true);
   } catch {
     /* ignore */
@@ -151,14 +231,8 @@ function addCandidate(map, raw, base) {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
-/**
- * rooms : id -> {
- *   state: { url, title, playing, time, updatedAt },
- *   clients: Set<WebSocket>
- * }
- * Le serveur est la source de vérité : quand quelqu'un arrive en cours de
- * lecture, on lui envoie la position calculée à l'instant T.
- */
+const MAX_PARTICIPANTS = 2; // « séance privée » : la salle admet 2 personnes
+
 const rooms = new Map();
 
 function getRoom(id) {
@@ -190,6 +264,54 @@ function broadcast(roomId, msg, except = null) {
   }
 }
 
+function sanitizeRoomId(raw) {
+  return String(raw || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
+}
+
+// Applique une action à l'état de la salle. Renvoie true si l'action est
+// valide (et doit être rediffusée), false sinon. Partagé entre le chemin
+// « participant » (WebSocket d'un membre) et le chemin « push » (téléchargeur).
+function applyActionToRoom(room, a) {
+  const s = room.state;
+  switch (a.kind) {
+    case "load":
+      s.url = String(a.url || "").slice(0, 2048);
+      s.title = String(a.title || "").slice(0, 200);
+      s.playing = false;
+      s.time = 0;
+      s.updatedAt = Date.now();
+      return true;
+    case "play":
+      s.playing = true;
+      s.time = Number(a.time) || 0;
+      s.updatedAt = Date.now();
+      return true;
+    case "pause":
+      s.playing = false;
+      s.time = Number(a.time) || 0;
+      s.updatedAt = Date.now();
+      return true;
+    case "seek":
+      s.time = Number(a.time) || 0;
+      s.playing = !!a.playing;
+      s.updatedAt = Date.now();
+      return true;
+    case "add": {
+      const url = String(a.url || "").slice(0, 2048);
+      if (!url) return false;
+      if (room.playlist.length < 50 && !room.playlist.some((e) => e.url === url)) {
+        room.playlist.push({ url, title: String(a.title || "").slice(0, 200) });
+      }
+      return true;
+    }
+    case "remove":
+      room.playlist = room.playlist.filter((e) => e.url !== String(a.url || ""));
+      return true;
+    default:
+      return false;
+  }
+}
+
 wss.on("connection", (ws) => {
   ws.roomId = null;
   ws.isAlive = true;
@@ -203,13 +325,30 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    if (msg.type === "join") {
-      const id = String(msg.room || "")
-        .replace(/[^A-Za-z0-9]/g, "")
-        .slice(0, 16);
+    // --- Push « one-shot » du téléchargeur : applique une action et la
+    //     rediffuse SANS occuper une des 2 places de la salle. -----------
+    if (msg.type === "push" && msg.action) {
+      const id = sanitizeRoomId(msg.room);
       if (!id) return;
-      ws.roomId = id;
       const room = getRoom(id);
+      if (applyActionToRoom(room, msg.action)) {
+        broadcast(id, { type: "action", action: msg.action });
+      }
+      return;
+    }
+
+    if (msg.type === "join") {
+      const id = sanitizeRoomId(msg.room);
+      if (!id) return;
+      const room = getRoom(id);
+      // Salle pleine : on refuse poliment (sans compter un éventuel socket
+      // déjà présent, ex. rechargement de page dont la fermeture n'est pas
+      // encore arrivée).
+      if (!room.clients.has(ws) && room.clients.size >= MAX_PARTICIPANTS) {
+        sendTo(ws, { type: "full", max: MAX_PARTICIPANTS });
+        return;
+      }
+      ws.roomId = id;
       room.clients.add(ws);
       sendTo(ws, { type: "state", state: currentState(room) });
       broadcast(id, { type: "peers", count: room.clients.size });
@@ -224,59 +363,16 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    // Signalisation WebRTC (appel vidéo) : le serveur relaie simplement les
-    // messages entre les deux personnes de la salle, sans les interpréter.
-    // Le flux audio/vidéo lui-même passe ensuite en pair-à-pair.
+    // Signalisation WebRTC (appel vidéo) : relais brut entre les membres.
     if (msg.type === "rtc" && msg.payload) {
       broadcast(ws.roomId, { type: "rtc", payload: msg.payload }, ws);
       return;
     }
 
     if (msg.type === "action" && msg.action) {
-      const a = msg.action;
-      const s = room.state;
-      switch (a.kind) {
-        case "load":
-          s.url = String(a.url || "").slice(0, 2048);
-          s.title = String(a.title || "").slice(0, 200);
-          s.playing = false;
-          s.time = 0;
-          s.updatedAt = Date.now();
-          break;
-        case "play":
-          s.playing = true;
-          s.time = Number(a.time) || 0;
-          s.updatedAt = Date.now();
-          break;
-        case "pause":
-          s.playing = false;
-          s.time = Number(a.time) || 0;
-          s.updatedAt = Date.now();
-          break;
-        case "seek":
-          s.time = Number(a.time) || 0;
-          s.playing = !!a.playing;
-          s.updatedAt = Date.now();
-          break;
-        // File d'épisodes : le téléchargeur (ou un membre de la salle) ajoute
-        // une vidéo prête, elle apparaît chez tout le monde dans « Épisodes
-        // prêts ». Pratique pour préparer l'épisode suivant pendant qu'on
-        // regarde le premier.
-        case "add": {
-          const url = String(a.url || "").slice(0, 2048);
-          if (!url) return;
-          if (room.playlist.length < 50 && !room.playlist.some((e) => e.url === url)) {
-            room.playlist.push({ url, title: String(a.title || "").slice(0, 200) });
-          }
-          break;
-        }
-        case "remove":
-          room.playlist = room.playlist.filter((e) => e.url !== String(a.url || ""));
-          break;
-        default:
-          return;
+      if (applyActionToRoom(room, msg.action)) {
+        broadcast(ws.roomId, { type: "action", action: msg.action }, ws);
       }
-      broadcast(ws.roomId, { type: "action", action: a }, ws);
     }
   });
 

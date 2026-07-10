@@ -525,6 +525,9 @@
     }
 
     // ------------------------- WebSocket ----------------------------------
+    var fullTries = 0;     // tentatives après un refus « salle pleine »
+    var giveUp = false;    // on arrête de se reconnecter (salle réellement pleine)
+
     function connect() {
       var proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(proto + "://" + location.host + "/ws");
@@ -535,14 +538,28 @@
       ws.onmessage = function (e) {
         var msg;
         try { msg = JSON.parse(e.data); } catch (err) { return; }
-        if (msg.type === "state") applyState(msg.state);
+        if (msg.type === "state") { fullTries = 0; applyState(msg.state); }
         else if (msg.type === "action") applyAction(msg.action);
         else if (msg.type === "peers") updatePeers(msg.count);
         else if (msg.type === "rtc") handleRtc(msg.payload);
+        else if (msg.type === "full") {
+          // La salle admet 2 personnes. Un rechargement peut laisser un ancien
+          // socket brièvement « fantôme » : on retente quelques fois avant
+          // d'abandonner, pour ne pas bloquer une reconnexion légitime.
+          fullTries++;
+          if (fullTries > 3) {
+            giveUp = true;
+            setPresence(false, "Salle pleine : 2 personnes sont déjà connectées ici.");
+          } else {
+            setPresence(false, "Salle pleine, nouvelle tentative dans un instant…");
+          }
+          try { ws.close(); } catch (err) {}
+        }
       };
       ws.onclose = function () {
+        if (giveUp) return;
         setPresence(false, "Reconnexion…");
-        setTimeout(connect, 1500);
+        setTimeout(connect, 2000);
       };
     }
     connect();
