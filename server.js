@@ -165,6 +165,7 @@ function getRoom(id) {
   if (!rooms.has(id)) {
     rooms.set(id, {
       state: { url: null, title: null, playing: false, time: 0, updatedAt: Date.now() },
+      playlist: [],   // épisodes prêts : [{ url, title }]
       clients: new Set(),
     });
   }
@@ -174,7 +175,7 @@ function getRoom(id) {
 function currentState(room) {
   const s = room.state;
   const time = s.playing ? s.time + (Date.now() - s.updatedAt) / 1000 : s.time;
-  return { url: s.url, title: s.title, playing: s.playing, time };
+  return { url: s.url, title: s.title, playing: s.playing, time, playlist: room.playlist };
 }
 
 function sendTo(ws, msg) {
@@ -256,6 +257,21 @@ wss.on("connection", (ws) => {
           s.time = Number(a.time) || 0;
           s.playing = !!a.playing;
           s.updatedAt = Date.now();
+          break;
+        // File d'épisodes : le téléchargeur (ou un membre de la salle) ajoute
+        // une vidéo prête, elle apparaît chez tout le monde dans « Épisodes
+        // prêts ». Pratique pour préparer l'épisode suivant pendant qu'on
+        // regarde le premier.
+        case "add": {
+          const url = String(a.url || "").slice(0, 2048);
+          if (!url) return;
+          if (room.playlist.length < 50 && !room.playlist.some((e) => e.url === url)) {
+            room.playlist.push({ url, title: String(a.title || "").slice(0, 200) });
+          }
+          break;
+        }
+        case "remove":
+          room.playlist = room.playlist.filter((e) => e.url !== String(a.url || ""));
           break;
         default:
           return;

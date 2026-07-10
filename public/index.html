@@ -230,6 +230,50 @@
     border: 1px solid var(--loge-2);
     transform: scaleX(-1); /* effet miroir, comme FaceTime */
   }
+  /* Les bulles se déplacent où on veut (glisser-déposer) */
+  #visios { cursor: grab; touch-action: none; user-select: none; }
+  #visios.deplacement { cursor: grabbing; }
+
+  .reglage-appel { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--brume); }
+  .reglage-appel input[type="range"] { width: 84px; accent-color: var(--faisceau); }
+  .reglage-appel select {
+    font: inherit; font-size: 12px; color: var(--ecran);
+    background: var(--nuit); border: 1px solid var(--loge-2);
+    border-radius: 8px; padding: 6px 8px; max-width: 150px;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Épisodes prêts (remplis par le téléchargeur pendant la séance)      */
+  /* ------------------------------------------------------------------ */
+  .episodes { margin-bottom: 22px; }
+  .episodes h2 { font-size: 20px; margin-bottom: 4px; }
+  .episodes > p { color: var(--brume); font-size: 14px; margin-bottom: 12px; }
+  .episodes .resultat .titre-ep { color: var(--ecran); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .episodes .resultat.en-cours { border-color: rgba(255,197,92,.5); }
+  .episodes .resultat button.retirer { background: transparent; color: var(--brume); padding: 7px 8px; }
+
+  /* ------------------------------------------------------------------ */
+  /* Mode cinéma : la PAGE passe en plein écran (pas la balise vidéo),   */
+  /* donc les bulles d'appel restent visibles par-dessus le film.        */
+  /* ------------------------------------------------------------------ */
+  body.cinema { overflow: hidden; }
+  body.cinema .ticket, body.cinema .presence, body.cinema .maintenant,
+  body.cinema .appel, body.cinema .episodes, body.cinema .sources,
+  body.cinema .note-bas { display: none; }
+  body.cinema .salle-ecran {
+    position: fixed; inset: 0; z-index: 40;
+    border-radius: 0; border: none; aspect-ratio: auto;
+    background: #000;
+  }
+  body.cinema .salle-ecran video { height: 100%; object-fit: contain; }
+  #btn-quitter-cinema {
+    position: absolute; top: 12px; right: 12px; z-index: 45;
+    background: rgba(5,6,15,.6); color: var(--ecran);
+    font-size: 13px; padding: 8px 12px; border-radius: 10px;
+    display: none;
+  }
+  body.cinema #btn-quitter-cinema { display: block; opacity: .45; }
+  body.cinema #btn-quitter-cinema:hover { opacity: 1; }
 
   .note-bas {
     margin-top: 28px; font-size: 13px; color: var(--brume);
@@ -300,10 +344,13 @@
         <button class="primaire" id="btn-lancer">▶&nbsp; Rejoindre la lecture</button>
         <div class="aide">Safari demande un geste pour démarrer la vidéo.</div>
       </div>
+
+      <button id="btn-quitter-cinema" type="button">✕ Quitter le mode cinéma (Échap)</button>
     </div>
 
     <div class="maintenant">
       <span class="titre-video" id="titre-video"></span>
+      <button id="btn-cinema" title="La page passe en plein écran : le film ET les bulles d'appel restent visibles">🎬 Mode cinéma</button>
       <button id="btn-resync" title="Se recaler sur la position de l'autre">Resynchroniser</button>
     </div>
 
@@ -313,9 +360,23 @@
       <span class="sonne cache" id="appel-sonne">📞 Ton/ta partenaire t'appelle…</span>
       <button class="primaire cache" id="btn-repondre">Rejoindre l'appel</button>
       <button class="primaire" id="btn-appeler">🎥 Démarrer l'appel</button>
+      <span class="reglage-appel cache" id="zone-camera">
+        <select id="sel-camera" title="Choisir la caméra à afficher"></select>
+      </span>
+      <span class="reglage-appel cache" id="zone-volume">
+        🔊 <input type="range" id="vol-distant" min="0" max="100" value="100"
+                  title="Volume de la voix de l'autre">
+      </span>
       <button class="cache" id="btn-micro" title="Couper / réactiver le micro">🎙️ Micro</button>
       <button class="cache" id="btn-camera" title="Couper / réactiver la caméra">📷 Caméra</button>
       <button class="danger cache" id="btn-raccrocher">Raccrocher</button>
+    </div>
+
+    <!-- ================= ÉPISODES PRÊTS ================= -->
+    <div class="episodes cache" id="bloc-episodes">
+      <h2>Épisodes prêts</h2>
+      <p>Envoyés par le téléchargeur — un clic et la lecture change chez vous deux.</p>
+      <div class="resultats" id="liste-episodes"></div>
     </div>
 
     <div class="sources">
@@ -523,6 +584,7 @@
 
       $("titre-video").textContent = title || url;
       $("ecran-vide").classList.add("cache");
+      renderEpisodes();   // met à jour le marqueur « en cours » de la liste
     }
 
     // ------------------------- Synchronisation ----------------------------
@@ -558,6 +620,7 @@
     });
 
     function applyState(state) {
+      if (state.playlist) { episodes = state.playlist; renderEpisodes(); }
       if (!state.url) { $("ecran-vide").classList.remove("cache"); return; }
 
       var mustLoad = state.url !== currentUrl;
@@ -581,6 +644,19 @@
     }
 
     function applyAction(a) {
+      // Actions de file d'épisodes (pas de garde : elles ne touchent pas la lecture)
+      if (a.kind === "add") {
+        if (a.url && !episodes.some(function (e) { return e.url === a.url; })) {
+          episodes.push({ url: a.url, title: a.title || "" });
+          renderEpisodes();
+        }
+        return;
+      }
+      if (a.kind === "remove") {
+        episodes = episodes.filter(function (e) { return e.url !== a.url; });
+        renderEpisodes();
+        return;
+      }
       guard(function () {
         switch (a.kind) {
           case "load":
@@ -603,6 +679,70 @@
         }
       });
     }
+
+    // ------------------------- Épisodes prêts ------------------------------
+    var episodes = [];
+
+    function renderEpisodes() {
+      var bloc = $("bloc-episodes");
+      var liste = $("liste-episodes");
+      bloc.classList.toggle("cache", episodes.length === 0);
+      liste.innerHTML = "";
+      episodes.forEach(function (ep) {
+        var ligne = document.createElement("div");
+        ligne.className = "resultat" + (ep.url === currentUrl ? " en-cours" : "");
+        var titre = document.createElement("span");
+        titre.className = "titre-ep";
+        titre.textContent = (ep.url === currentUrl ? "▸ " : "") + (ep.title || ep.url);
+        var actions = document.createElement("span");
+        actions.style.cssText = "display:flex; gap:6px; flex-shrink:0;";
+        var lire = document.createElement("button");
+        lire.className = "primaire";
+        lire.textContent = "▶ Regarder";
+        lire.addEventListener("click", function () {
+          chargerPourTous(ep.url, ep.title || nomDepuisURL(ep.url));
+          renderEpisodes();
+        });
+        var retirer = document.createElement("button");
+        retirer.className = "retirer";
+        retirer.textContent = "✕";
+        retirer.title = "Retirer de la liste (chez vous deux)";
+        retirer.addEventListener("click", function () {
+          episodes = episodes.filter(function (e) { return e.url !== ep.url; });
+          renderEpisodes();
+          send({ kind: "remove", url: ep.url });
+        });
+        actions.appendChild(lire);
+        actions.appendChild(retirer);
+        ligne.appendChild(titre);
+        ligne.appendChild(actions);
+        liste.appendChild(ligne);
+      });
+    }
+
+    // ------------------------- Mode cinéma ---------------------------------
+    // On met la PAGE en plein écran (pas la balise <video>) : le film emplit
+    // l'écran ET les bulles de l'appel restent visibles par-dessus.
+    function setCinema(on) {
+      document.body.classList.toggle("cinema", on);
+      if (on) {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(function () {});
+        }
+      } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(function () {});
+      }
+    }
+    $("btn-cinema").addEventListener("click", function () { setCinema(true); });
+    $("btn-quitter-cinema").addEventListener("click", function () { setCinema(false); });
+    document.addEventListener("fullscreenchange", function () {
+      // Échap en plein écran natif : on quitte aussi le mode cinéma.
+      if (!document.fullscreenElement) document.body.classList.remove("cinema");
+    });
+    document.addEventListener("keydown", function (e) {
+      // iPhone / cas sans plein écran natif : Échap quitte quand même.
+      if (e.key === "Escape") document.body.classList.remove("cinema");
+    });
 
     // Nos propres interactions -> envoyées à l'autre
     video.addEventListener("play", function () {
@@ -757,6 +897,8 @@
       $("btn-raccrocher").classList.toggle("cache", !live);
       $("btn-micro").classList.toggle("cache", !live);
       $("btn-camera").classList.toggle("cache", !live);
+      $("zone-volume").classList.toggle("cache", callState !== "live");
+      $("zone-camera").classList.toggle("cache", !live || $("sel-camera").options.length < 2);
       $("appel-sonne").classList.toggle("cache", callState !== "ringing");
       $("btn-repondre").classList.toggle("cache", callState !== "ringing");
       $("visios").classList.toggle("actif", live);
@@ -812,6 +954,7 @@
       getMedia().then(function (stream) {
         localStream = stream;
         $("visio-locale").srcObject = stream;
+        populateCameras();
         pc = createPC();
         stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
         return pc.createOffer();
@@ -833,6 +976,7 @@
       getMedia().then(function (stream) {
         localStream = stream;
         $("visio-locale").srcObject = stream;
+        populateCameras();
         pc = createPC();
         stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
         return pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -916,6 +1060,100 @@
       $("btn-micro").textContent = "🎙️ Micro"; $("btn-micro").classList.remove("actif-off");
       $("btn-camera").textContent = "📷 Caméra"; $("btn-camera").classList.remove("actif-off");
     }
+
+    // ------------------- Choix de la caméra (pendant l'appel) -------------
+    // La liste n'est remplie qu'une fois l'autorisation caméra donnée
+    // (avant, les navigateurs masquent les noms des périphériques).
+    function populateCameras() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      navigator.mediaDevices.enumerateDevices().then(function (devs) {
+        var sel = $("sel-camera");
+        var cams = devs.filter(function (d) { return d.kind === "videoinput"; });
+        sel.innerHTML = "";
+        cams.forEach(function (c, i) {
+          var o = document.createElement("option");
+          o.value = c.deviceId;
+          o.textContent = c.label || ("Caméra " + (i + 1));
+          sel.appendChild(o);
+        });
+        var actuel = localStream && localStream.getVideoTracks()[0];
+        if (actuel && actuel.getSettings && actuel.getSettings().deviceId) {
+          sel.value = actuel.getSettings().deviceId;
+        }
+        setCallUI();
+      }).catch(function () {});
+    }
+
+    $("sel-camera").addEventListener("change", function () {
+      var id = this.value;
+      if (!localStream || !id) return;
+      var ancienne = localStream.getVideoTracks()[0];
+      var etait = ancienne ? ancienne.enabled : true;
+      navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } }, audio: false })
+        .then(function (s) {
+          var nouvelle = s.getVideoTracks()[0];
+          nouvelle.enabled = etait;   // garde l'état coupé/actif de la caméra
+          // Remplace la piste envoyée à l'autre SANS couper l'appel.
+          if (pc) {
+            var sender = pc.getSenders().find(function (x) { return x.track && x.track.kind === "video"; });
+            if (sender) sender.replaceTrack(nouvelle);
+          }
+          if (ancienne) { localStream.removeTrack(ancienne); ancienne.stop(); }
+          localStream.addTrack(nouvelle);
+        })
+        .catch(function () {
+          $("appel-etat").textContent = "Impossible d'utiliser cette caméra.";
+          setTimeout(setCallUI, 4000);
+        });
+    });
+
+    // ------------------- Volume de la voix de l'autre ---------------------
+    $("vol-distant").addEventListener("input", function () {
+      $("visio-distante").volume = Number(this.value) / 100;
+    });
+
+    // ------------------- Bulles déplaçables (glisser-déposer) -------------
+    (function makeDraggable(el) {
+      var startX = 0, startY = 0, origX = 0, origY = 0, dragging = false;
+
+      // Position mémorisée d'une séance à l'autre
+      try {
+        var saved = JSON.parse(localStorage.getItem("we_visios") || "null");
+        if (saved) placer(saved.x, saved.y);
+      } catch (e) {}
+
+      function placer(x, y) {
+        x = Math.max(0, Math.min(x, window.innerWidth - el.offsetWidth - 4));
+        y = Math.max(0, Math.min(y, window.innerHeight - el.offsetHeight - 4));
+        el.style.left = x + "px";
+        el.style.top = y + "px";
+        el.style.right = "auto";
+        el.style.bottom = "auto";
+      }
+
+      el.addEventListener("pointerdown", function (e) {
+        dragging = true;
+        el.classList.add("deplacement");
+        el.setPointerCapture(e.pointerId);
+        startX = e.clientX; startY = e.clientY;
+        var r = el.getBoundingClientRect();
+        origX = r.left; origY = r.top;
+      });
+      el.addEventListener("pointermove", function (e) {
+        if (!dragging) return;
+        placer(origX + (e.clientX - startX), origY + (e.clientY - startY));
+      });
+      el.addEventListener("pointerup", function () {
+        if (!dragging) return;
+        dragging = false;
+        el.classList.remove("deplacement");
+        var r = el.getBoundingClientRect();
+        try { localStorage.setItem("we_visios", JSON.stringify({ x: r.left, y: r.top })); } catch (err) {}
+      });
+      window.addEventListener("resize", function () {
+        if (el.style.left) placer(parseFloat(el.style.left), parseFloat(el.style.top));
+      });
+    })($("visios"));
 
     setCallUI();
 
