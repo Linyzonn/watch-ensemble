@@ -235,6 +235,56 @@ const MAX_PARTICIPANTS = 2; // « séance privée » : la salle admet 2 personne
 
 const rooms = new Map();
 
+// ---------------------------------------------------------------------------
+// Persistance « best-effort » des salles sur disque : au réveil du serveur
+// (Render Free se met en veille après ~15 min d'inactivité), l'état des salles
+// et la liste des épisodes prêts survivent, au lieu de repartir de zéro.
+// On ne sérialise QUE {state, playlist} — jamais les sockets clients.
+// ---------------------------------------------------------------------------
+const STATE_FILE = path.join(__dirname, "rooms.json");
+let persistTimer = null;
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    const out = {};
+    for (const [id, room] of rooms) {
+      out[id] = { state: room.state, playlist: room.playlist };
+    }
+    fs.writeFile(STATE_FILE, JSON.stringify(out), () => {});
+  }, 1500);
+}
+function loadRooms() {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch { return; }
+  const now = Date.now();
+  for (const id of Object.keys(raw || {})) {
+    const r = raw[id];
+    if (!r || !r.state) continue;
+    // On ne restaure que les salles utilisées dans les dernières 24 h.
+    if (now - (r.state.updatedAt || 0) > 24 * 3600 * 1000) continue;
+    rooms.set(id, { state: r.state, playlist: r.playlist || [], clients: new Set() });
+  }
+}
+loadRooms();
+
+// Balayage périodique : retire les salles vides et inactives (> 2 h) pour ne
+// pas garder en mémoire des salles restaurées que plus personne ne rejoint.
+setInterval(() => {
+  const now = Date.now();
+  let changed = false;
+  for (const [id, room] of rooms) {
+    if (room.clients.size === 0 && now - (room.state.updatedAt || 0) > 2 * 3600 * 1000) {
+      rooms.delete(id); changed = true;
+    }
+  }
+  if (changed) schedulePersist();
+}, 30 * 60 * 1000).unref();
+
+function firstClient(room) {
+  return room.clients.size ? room.clients.values().next().value : null;
+}
+
 function getRoom(id) {
   if (!rooms.has(id)) {
     rooms.set(id, {
@@ -325,6 +375,14 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // --- Synchronisation d'horloge : le serveur est l'horloge de référence.
+    //     Le client mesure ainsi le décalage entre son horloge et celle du
+    //     serveur, pour compenser la latence réseau sur play/seek/resume. ---
+    if (msg.type === "ping") {
+      sendTo(ws, { type: "pong", t0: msg.t0, ts: Date.now() });
+      return;
+    }
+
     // --- Push « one-shot » du téléchargeur : applique une action et la
     //     rediffuse SANS occuper une des 2 places de la salle. -----------
     if (msg.type === "push" && msg.action) {
@@ -332,7 +390,9 @@ wss.on("connection", (ws) => {
       if (!id) return;
       const room = getRoom(id);
       if (applyActionToRoom(room, msg.action)) {
+        msg.action.at = Date.now();
         broadcast(id, { type: "action", action: msg.action });
+        schedulePersist();
       }
       return;
     }
@@ -350,7 +410,14 @@ wss.on("connection", (ws) => {
       }
       ws.roomId = id;
       room.clients.add(ws);
-      sendTo(ws, { type: "state", state: currentState(room) });
+      // Le premier client d'une salle est le « meneur » : c'est lui qui pilote
+      // l'enchaînement automatique des épisodes (évite le double-chargement).
+      sendTo(ws, {
+        type: "state",
+        state: currentState(room),
+        leader: firstClient(room) === ws,
+        at: Date.now(),
+      });
       broadcast(id, { type: "peers", count: room.clients.size });
       return;
     }
@@ -359,7 +426,14 @@ wss.on("connection", (ws) => {
     const room = getRoom(ws.roomId);
 
     if (msg.type === "requestState") {
-      sendTo(ws, { type: "state", state: currentState(room) });
+      sendTo(ws, { type: "state", state: currentState(room), at: Date.now() });
+      return;
+    }
+
+    // Coordination du buffering : « je charge, attends-moi » / « c'est reparti ».
+    // Simple relais entre les 2 membres (n'altère pas l'état de la salle).
+    if (msg.type === "stall" || msg.type === "resume") {
+      broadcast(ws.roomId, { type: msg.type, time: Number(msg.time) || 0, at: Date.now() }, ws);
       return;
     }
 
@@ -371,7 +445,9 @@ wss.on("connection", (ws) => {
 
     if (msg.type === "action" && msg.action) {
       if (applyActionToRoom(room, msg.action)) {
+        msg.action.at = Date.now(); // horodatage serveur pour la compensation
         broadcast(ws.roomId, { type: "action", action: msg.action }, ws);
+        schedulePersist();
       }
     }
   });
@@ -382,6 +458,9 @@ wss.on("connection", (ws) => {
     const room = rooms.get(roomId);
     room.clients.delete(ws);
     broadcast(roomId, { type: "peers", count: room.clients.size });
+    // Promeut le client restant en « meneur » (si le meneur vient de partir).
+    const nf = firstClient(room);
+    if (nf) sendTo(nf, { type: "role", leader: true });
     // Nettoyage des salles vides après 10 minutes
     if (room.clients.size === 0) {
       setTimeout(() => {

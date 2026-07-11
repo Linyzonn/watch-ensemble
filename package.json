@@ -1,6 +1,6 @@
 {
   "name": "watch-ensemble",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Salle de cinéma privée pour deux : lecture vidéo synchronisée via un simple lien.",
   "main": "server.js",
   "scripts": {

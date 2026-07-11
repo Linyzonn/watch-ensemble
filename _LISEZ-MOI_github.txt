@@ -1,12 +1,24 @@
 Contenu à mettre à la RACINE de ton dépôt GitHub (Linyzonn/watch-ensemble),
 exactement comme la structure actuelle : server.js + package.json + public/.
+(version 2.4)
 
 COMMENT FAIRE (upload web GitHub) :
 1. Extrais ce zip (GitHub ne sait pas extraire un zip lui-même).
 2. Sur ton dépôt : "Add file" > "Upload files".
-3. Glisse ces 4 éléments : server.js, package.json, package-lock.json et le
-   DOSSIER public.  -> GitHub remplace les fichiers existants de même nom.
+3. Glisse ces éléments : server.js, package.json, package-lock.json,
+   le DOSSIER public, et .gitignore.  -> GitHub remplace les fichiers de même nom.
 4. "Commit changes". Render redéploie tout seul (1 à 2 min).
 
-package-lock.json est nouveau (il verrouille multer 2.x) : tu peux l'inclure,
-c'est recommandé. Rien d'autre à toucher.
+QUOI DE NEUF CÔTÉ SERVEUR (v2.4) — pense à redéployer :
+- Horodatage des actions (le serveur devient l'horloge de référence) : c'est ce
+  qui permet aux clients de compenser la latence réseau sur play/avance/reprise.
+- Coordination du buffering : messages "stall"/"resume" relayés entre les deux.
+- Rôle "meneur" attribué au 1er client (enchaînement auto des épisodes sans
+  double-chargement).
+- Persistance des salles : l'état + les épisodes prêts sont écrits dans
+  rooms.json ; au réveil du serveur (Render Free se met en veille), vous ne
+  repartez plus de zéro. Ce fichier est créé automatiquement et ignoré par git
+  (voir .gitignore) — rien à committer.
+
+package-lock.json verrouille toujours multer 2.x et les versions à jour d'Express
+et ws : inclus-le, c'est recommandé.
