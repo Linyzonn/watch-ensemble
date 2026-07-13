@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Watch Ensemble — cinéma pour deux</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<!-- PWA : « Ajouter à l'écran d'accueil » (installable comme une app) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#121430">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Watch Ensemble">
+<link rel="apple-touch-icon" href="/icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Outfit:wght@400;500;600&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
@@ -165,6 +173,11 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* Voile d'erreur du lecteur (vidéo disparue, lien expiré, réseau…) */
+  .voile-erreur { background: rgba(5,6,15,.85); }
+  .voile-erreur .titre-attente { color: var(--velours); }
+  .voile-erreur .aide { max-width: 46ch; }
+
   /* Indicateur de synchro dans la barre « maintenant » */
   .sync-etat {
     font-family: "Space Mono", monospace; font-size: 12px; color: var(--brume);
@@ -319,7 +332,7 @@
       <button class="primaire" id="btn-creer">Créer une salle</button>
       <span class="ou">ou rejoindre avec un code</span>
       <div class="rejoindre">
-        <input type="text" id="champ-code" placeholder="EX : K7M2QF" maxlength="12"
+        <input type="text" id="champ-code" placeholder="EX : K7M2QF" maxlength="16"
                autocapitalize="characters" autocomplete="off" spellcheck="false"
                aria-label="Code de la salle">
         <button id="btn-rejoindre">Entrer</button>
@@ -348,8 +361,8 @@
       </div>
     </div>
 
-    <div class="presence" id="presence">
-      <span class="point"></span>
+    <div class="presence" id="presence" role="status" aria-live="polite">
+      <span class="point" aria-hidden="true"></span>
       <span id="presence-texte">Connexion…</span>
     </div>
 
@@ -370,6 +383,12 @@
         <div class="spin"></div>
         <div class="titre-attente">On attend l'autre…</div>
         <div class="aide">La lecture reprend dès que vous êtes prêts tous les deux.</div>
+      </div>
+
+      <div class="voile-lecture voile-erreur cache" id="voile-erreur">
+        <div class="titre-attente">⚠️ La vidéo ne se charge pas</div>
+        <div class="aide" id="erreur-detail"></div>
+        <button id="btn-reessayer">Réessayer</button>
       </div>
 
       <button id="btn-quitter-cinema" type="button">✕ Quitter le mode cinéma (Échap)</button>
@@ -395,6 +414,12 @@
         🔊 <input type="range" id="vol-distant" min="0" max="100" value="100"
                   title="Volume de la voix de l'autre">
       </span>
+      <span class="reglage-appel cache" id="zone-hp">
+        <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"
+               title="À cocher si tu regardes SANS écouteurs : filtre le son du film capté par ton micro, pour que l'autre ne l'entende pas en écho. (La vraie solution reste des écouteurs.)">
+          <input type="checkbox" id="chk-hp"> 📢 sans écouteurs
+        </label>
+      </span>
       <button class="cache" id="btn-micro" title="Couper / réactiver le micro">🎙️ Micro</button>
       <button class="cache" id="btn-camera" title="Couper / réactiver la caméra">📷 Caméra</button>
       <button class="danger cache" id="btn-raccrocher">Raccrocher</button>
@@ -419,7 +444,7 @@
             <input type="url" id="champ-url" placeholder="https://…/video.mp4" inputmode="url">
             <button class="primaire" id="btn-charger-url">Charger</button>
           </div>
-          <div class="message" id="msg-url"></div>
+          <div class="message" id="msg-url" role="status" aria-live="polite"></div>
         </div>
       </details>
 
@@ -434,7 +459,7 @@
             <input type="url" id="champ-page" placeholder="https://exemple.com/article-avec-video" inputmode="url">
             <button id="btn-extraire">Chercher</button>
           </div>
-          <div class="message" id="msg-extraire"></div>
+          <div class="message" id="msg-extraire" role="status" aria-live="polite"></div>
           <div class="resultats" id="resultats-extraction"></div>
         </div>
       </details>
@@ -449,7 +474,7 @@
           </div>
           <input type="file" id="champ-fichier" accept="video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,.webm">
           <progress id="barre-upload" max="100" value="0" class="cache"></progress>
-          <div class="message" id="msg-upload"></div>
+          <div class="message" id="msg-upload" role="status" aria-live="polite"></div>
         </div>
       </details>
     </div>
@@ -469,7 +494,9 @@
   <video id="visio-locale" autoplay playsinline muted></video>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+<!-- hls.js auto-hébergé : plus de dépendance à un CDN tiers (qui pouvait
+     être indisponible, ou compromis — le script n'avait pas d'intégrité SRI). -->
+<script src="/hls.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -603,10 +630,13 @@
         }
         else if (msg.type === "resume") {
           // L'autre est reparti : on se recale sur sa position et on relance.
+          // Tolérance LARGE (2 s) : un saut arrière de quelques dixièmes après
+          // chaque micro-buffering de l'autre s'entendait (« mot qui roule ») ;
+          // sous 2 s, l'ancre + la correction douce recollent sans à-coup.
           peerStalled = false;
           var target = compensate(Number(msg.time) || 0, msg.at, intendPlaying);
           guard(function () {
-            maybeSeek(target, 0.3);
+            maybeSeek(target, 2);
             if (intendPlaying) tryPlay();
           });
           anchor(target, intendPlaying);
@@ -662,10 +692,18 @@
     }
 
     // ------------------------- Chargement d'une source --------------------
+    var hlsRecoveries = 0; // tentatives de récupération hls.js pour CE média
+
     function loadSource(url, title) {
+      hideVideoError();
+      hlsRecoveries = 0;
       if (hls) { hls.destroy(); hls = null; }
       currentUrl = url;
       video.playbackRate = 1;
+      // Les corrections de vitesse ne doivent pas changer la hauteur du son
+      // (explicite pour Safari, c'est le défaut ailleurs).
+      video.preservesPitch = true;
+      try { video.webkitPreservesPitch = true; } catch (e) {}
       iAmStalled = false; peerStalled = false;
 
       var estHls = /\.m3u8(\?|$)/i.test(url);
@@ -675,6 +713,19 @@
         hls = new Hls();
         hls.loadSource(url);
         hls.attachMedia(video);
+        hls.on(Hls.Events.ERROR, function (e, data) {
+          if (!data || !data.fatal) return;
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsRecoveries < 2) {
+            hlsRecoveries++;
+            try { hls.recoverMediaError(); return; } catch (err) { /* irrécupérable */ }
+          }
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            showVideoError("Le flux ne répond plus — ces liens expirent souvent après quelques heures. " +
+                           "Attrape un lien frais (extension ou téléchargeur), ou clique Réessayer.");
+          } else {
+            showVideoError("Le flux vidéo a rencontré une erreur irrécupérable. Réessaie, ou repasse par le téléchargeur.");
+          }
+        });
       } else {
         video.src = url;
       }
@@ -683,6 +734,45 @@
       $("ecran-vide").classList.add("cache");
       renderEpisodes();   // met à jour le marqueur « en cours » de la liste
     }
+
+    // ------------------------- Erreurs du lecteur --------------------------
+    // Avant : une vidéo disparue (le serveur vide son disque en redémarrant),
+    // un lien HLS expiré ou une coupure réseau laissaient un ÉCRAN NOIR muet.
+    // On explique la cause probable et on propose de réessayer.
+    function showVideoError(detail) {
+      $("erreur-detail").textContent = detail;
+      $("voile-erreur").classList.remove("cache");
+      $("voile-lecture").classList.add("cache");
+    }
+    function hideVideoError() {
+      $("voile-erreur").classList.add("cache");
+    }
+    $("btn-reessayer").addEventListener("click", function () {
+      if (!currentUrl) { hideVideoError(); return; }
+      var url = currentUrl;
+      var titre = $("titre-video").textContent;
+      guard(function () { loadSource(url, titre); });
+    });
+    video.addEventListener("error", function () {
+      if (!currentUrl || hls) return; // hls.js gère ses propres erreurs
+      var code = (video.error && video.error.code) || 0;
+      var estMedia = currentUrl.indexOf("/media/") !== -1;
+      var detail;
+      if (code === 2) {
+        detail = "La connexion s'est interrompue pendant le chargement. Vérifie ta connexion puis clique Réessayer.";
+      } else if (code === 3) {
+        detail = "Le fichier semble abîmé, ou dans un format que ce navigateur ne décode pas.";
+      } else if (estMedia) {
+        detail = "La vidéo n'est plus sur le serveur (il vide son disque en redémarrant). " +
+                 "Renvoie l'épisode depuis le téléchargeur.";
+      } else {
+        detail = "Cette adresse n'est pas lisible ici : format non pris en charge, lien expiré, " +
+                 "ou site qui bloque la lecture externe. Passe par le téléchargeur pour cet épisode.";
+      }
+      showVideoError(detail);
+      updateSyncBadge();
+    });
+    video.addEventListener("playing", hideVideoError);
 
     // ------------------------- Synchronisation ----------------------------
     function guard(fn) {
@@ -712,9 +802,20 @@
     }
 
     // ---- Correction de dérive douce --------------------------------------
-    // Toutes les secondes, on se compare à la position attendue. Petit écart :
-    // on ajuste le playbackRate (imperceptible, pas de saccade). Gros écart :
-    // saut sec. C'est ce qui empêche les deux vidéos de diverger lentement.
+    // Vous ne regardez PAS le même écran : un écart < 0,6 s entre deux foyers
+    // est imperceptible. L'ancien réglage (seuil 0,15 s, correction ±6 %
+    // appliquée d'un coup) déclenchait sans cesse des à-coups audibles : dès
+    // qu'une horloge dérivait un peu, on entendait un « mot qui roule »
+    // toutes les 10-20 s. Désormais :
+    //  - zone morte large (0,6 s) : on ne touche à RIEN en dessous ;
+    //  - correction proportionnelle et douce (±3 % max), poursuivie jusqu'à
+    //    recoller vraiment (hystérésis à 0,25 s) pour éviter l'oscillation ;
+    //  - saut sec réservé aux vrais décrochages (> 4 s).
+    var DRIFT_DEADBAND = 0.6;  // en dessous : on laisse vivre
+    var DRIFT_RELEASE = 0.25;  // une correction en cours s'arrête ici
+    var DRIFT_HARD = 4;        // au-delà : saut sec
+    var correcting = false;
+
     function startDrift() {
       if (driftTimer) return;
       driftTimer = setInterval(function () {
@@ -724,13 +825,18 @@
         var exp = expectedTime();
         var diff = video.currentTime - exp;
         if (!isFinite(diff)) return;
-        if (Math.abs(diff) > 2) {
+        var mag = Math.abs(diff);
+        if (mag > DRIFT_HARD) {
           guard(function () { video.currentTime = exp; });
           video.playbackRate = 1;
-        } else if (Math.abs(diff) > 0.15) {
-          var adj = Math.max(-0.06, Math.min(0.06, diff)); // ±6 % max
-          video.playbackRate = 1 - adj;                    // en retard -> accélère
+          correcting = false;
+        } else if (mag > DRIFT_DEADBAND || (correcting && mag > DRIFT_RELEASE)) {
+          correcting = true;
+          // 10 % de l'écart par seconde, borné à ±3 % : inaudible, converge.
+          var adj = Math.max(-0.03, Math.min(0.03, diff * 0.1));
+          video.playbackRate = 1 - adj; // en retard -> accélère
         } else {
+          correcting = false;
           video.playbackRate = 1;
         }
       }, 1000);
@@ -745,7 +851,7 @@
       if (iAmStalled) { el.className = "sync-etat attente"; el.textContent = "⏳ chargement"; return; }
       if (!intendPlaying || video.paused) { el.className = "sync-etat"; el.textContent = ""; return; }
       var diff = Math.abs(video.currentTime - expectedTime());
-      if (diff < 0.4) { el.className = "sync-etat ok"; el.textContent = "● synchro"; }
+      if (diff < 1 && !correcting) { el.className = "sync-etat ok"; el.textContent = "● synchro"; }
       else { el.className = "sync-etat corrige"; el.textContent = "↻ recalage"; }
     }
 
@@ -874,6 +980,7 @@
         retirer.className = "retirer";
         retirer.textContent = "✕";
         retirer.title = "Retirer de la liste (chez vous deux)";
+        retirer.setAttribute("aria-label", "Retirer « " + (ep.title || ep.url) + " » de la liste");
         retirer.addEventListener("click", function () {
           episodes = episodes.filter(function (e) { return e.url !== ep.url; });
           renderEpisodes();
@@ -1096,16 +1203,19 @@
     // WebSocket de la salle ; le flux audio/vidéo passe ensuite directement
     // entre vos deux appareils (pair-à-pair). Les serveurs STUN/TURN publics
     // ci-dessous aident la connexion à s'établir derrière les box internet.
+    // Configuration ICE récupérée du serveur (/api/ice) : STUN par défaut,
+    // plus un éventuel TURN personnel si le serveur en fournit un (variables
+    // d'environnement — voir README). On garde un repli STUN au cas où la
+    // requête échoue. L'ancien relais mort « openrelay » a été retiré.
     var ICE = {
       iceServers: [
-        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-        {
-          urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443",
-                 "turns:openrelay.metered.ca:443?transport=tcp"],
-          username: "openrelayproject", credential: "openrelayproject"
-        }
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
       ]
     };
+    fetch("/api/ice")
+      .then(function (r) { return r.json(); })
+      .then(function (d) { if (d && d.iceServers && d.iceServers.length) ICE = d; })
+      .catch(function () { /* repli STUN ci-dessus */ });
 
     var pc = null;              // RTCPeerConnection en cours
     var localStream = null;     // caméra + micro locaux
@@ -1126,6 +1236,7 @@
       $("btn-micro").classList.toggle("cache", !live);
       $("btn-camera").classList.toggle("cache", !live);
       $("zone-volume").classList.toggle("cache", callState !== "live");
+      $("zone-hp").classList.toggle("cache", callState !== "live");
       $("zone-camera").classList.toggle("cache", !live || $("sel-camera").options.length < 2);
       $("appel-sonne").classList.toggle("cache", callState !== "ringing");
       $("btn-repondre").classList.toggle("cache", callState !== "ringing");
@@ -1144,9 +1255,100 @@
     function getMedia() {
       return navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
-        audio: { echoCancellation: true, noiseSuppression: true }
+        // autoGainControl coupé : sinon le navigateur remonte le gain dans les
+        // silences et fait justement ressortir le film capté par le micro.
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }
       });
     }
+
+    // ---- Filtre micro « mode haut-parleurs / sans écouteurs » ------------
+    // Cas réel : l'un regarde sur haut-parleurs — le son du film sort de ses
+    // enceintes, rentre dans son micro, et l'autre l'entend en écho décalé.
+    // L'annulation d'écho du navigateur ne connaît que le son de l'APPEL, pas
+    // celui du film ; on ne peut pas « soustraire » le film, mais on peut le
+    // réduire fortement sur le micro SORTANT de qui coche la case :
+    //  - passe-bande ~200-3500 Hz : garde la voix, coupe basses (musique,
+    //    explosions) et aigus ;
+    //  - noise gate : sous un seuil, on ferme le micro (le film de fond passe
+    //    sous la voix de près) ;
+    //  - compresseur : lisse ce qui reste.
+    // Honnête : ça n'égale pas des écouteurs, mais ça enlève l'essentiel.
+    var audioCtx = null, gateNode = null, hpFilterOn = false;
+
+    function buildMicFilter(rawStream) {
+      try {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        audioCtx = new Ctx();
+        var src = audioCtx.createMediaStreamSource(rawStream);
+
+        // Passe-haut à DEUX étages (~24 dB/oct) : rejette fort la musique et
+        // les basses (mesuré : -52 dB à 60 Hz, -33 dB à 100 Hz), la voix passe.
+        var hp1 = audioCtx.createBiquadFilter();
+        hp1.type = "highpass"; hp1.frequency.value = 250;
+        var hp2 = audioCtx.createBiquadFilter();
+        hp2.type = "highpass"; hp2.frequency.value = 250;
+        var lp = audioCtx.createBiquadFilter();
+        lp.type = "lowpass"; lp.frequency.value = 3500;    // haut de la bande vocale
+
+        // Noise gate maison (ScriptProcessor : large compat, dont Safari).
+        // C'est lui qui coupe le film de fond entre les phrases : sous le
+        // seuil, on ferme le micro ; le film capté de loin passe en dessous
+        // de la voix de près.
+        var gate = audioCtx.createScriptProcessor(2048, 1, 1);
+        var env = 0;
+        gate.onaudioprocess = function (e) {
+          var inp = e.inputBuffer.getChannelData(0);
+          var out = e.outputBuffer.getChannelData(0);
+          for (var i = 0; i < inp.length; i++) {
+            var a = Math.abs(inp[i]);
+            env = a > env ? a * 0.3 + env * 0.7 : env * 0.95; // suiveur d'enveloppe
+            var g = env > 0.02 ? 1 : env / 0.02;               // seuil ~ -34 dB
+            out[i] = inp[i] * g * g;
+          }
+        };
+        gateNode = gate;
+
+        // Compresseur DOUX après le gate : lisse la voix sans remonter le
+        // fond (un ratio agressif ferait ressortir le film dans les silences).
+        var comp = audioCtx.createDynamicsCompressor();
+        comp.threshold.value = -24; comp.knee.value = 18;
+        comp.ratio.value = 4; comp.attack.value = 0.005; comp.release.value = 0.25;
+
+        var dest = audioCtx.createMediaStreamDestination();
+        src.connect(hp1); hp1.connect(hp2); hp2.connect(lp);
+        lp.connect(gate); gate.connect(comp); comp.connect(dest);
+        return dest.stream.getAudioTracks()[0];
+      } catch (e) { return null; }
+    }
+
+    function destroyMicFilter() {
+      if (gateNode) { try { gateNode.onaudioprocess = null; gateNode.disconnect(); } catch (e) {} gateNode = null; }
+      if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    }
+
+    // Active/désactive le filtre en remplaçant la piste audio ENVOYÉE, sans
+    // couper l'appel. localStream garde toujours la piste micro brute (c'est
+    // elle que le bouton Micro coupe/réactive).
+    function applyMicFilter(on) {
+      if (!localStream || !pc) return;
+      var rawAudio = localStream.getAudioTracks()[0];
+      if (!rawAudio) return;
+      var sender = pc.getSenders().find(function (s) { return s.track && s.track.kind === "audio"; });
+      if (!sender) return;
+      if (on) {
+        var only = new MediaStream([rawAudio]);
+        destroyMicFilter();
+        var filtered = buildMicFilter(only);
+        if (filtered) { filtered.enabled = rawAudio.enabled; sender.replaceTrack(filtered); hpFilterOn = true; }
+      } else {
+        sender.replaceTrack(rawAudio);
+        destroyMicFilter();
+        hpFilterOn = false;
+      }
+    }
+
+    $("chk-hp").addEventListener("change", function () { applyMicFilter(this.checked); });
 
     function createPC() {
       var conn = new RTCPeerConnection(ICE);
@@ -1270,6 +1472,8 @@
 
     function endCall(silentToPeer, message) {
       if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+      destroyMicFilter();               // libère l'AudioContext du filtre micro
+      hpFilterOn = false; $("chk-hp").checked = false;
       if (localStream) {
         localStream.getTracks().forEach(function (t) { t.stop(); });
         localStream = null;

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Watch Ensemble">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1f45"/>
+      <stop offset="1" stop-color="#0f1130"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="1.05" r="0.75">
+      <stop offset="0" stop-color="#ffc55c" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ffc55c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- fond -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <!-- clap de cinéma, centré -->
+  <g transform="translate(256 262) rotate(-8)">
+    <!-- corps -->
+    <rect x="-150" y="-40" width="300" height="150" rx="16" fill="#f4f1e4"/>
+    <!-- claquette (partie haute) -->
+    <g>
+      <rect x="-150" y="-92" width="300" height="52" rx="12" fill="#1c2044"/>
+      <!-- bandes obliques ambre -->
+      <g fill="#ffc55c">
+        <polygon points="-140,-92 -104,-92 -128,-40 -164,-40"/>
+        <polygon points="-80,-92 -44,-92 -68,-40 -104,-40"/>
+        <polygon points="-20,-92 16,-92 -8,-40 -44,-40"/>
+        <polygon points="40,-92 76,-92 52,-40 16,-40"/>
+        <polygon points="100,-92 136,-92 112,-40 76,-40"/>
+      </g>
+    </g>
+    <!-- petites lignes décoratives sur le corps -->
+    <g stroke="#c9c6ba" stroke-width="7" stroke-linecap="round">
+      <line x1="-120" y1="0" x2="120" y2="0"/>
+      <line x1="-120" y1="34" x2="70" y2="34"/>
+      <line x1="-120" y1="68" x2="40" y2="68"/>
+    </g>
+  </g>
+</svg>

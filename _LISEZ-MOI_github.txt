@@ -1,15 +1,34 @@
 Contenu à mettre à la RACINE de ton dépôt GitHub (Linyzonn/watch-ensemble),
 exactement comme la structure actuelle : server.js + package.json + public/.
-(version 2.4)
+(version 2.6)
 
 COMMENT FAIRE (upload web GitHub) :
 1. Extrais ce zip (GitHub ne sait pas extraire un zip lui-même).
 2. Sur ton dépôt : "Add file" > "Upload files".
 3. Glisse ces éléments : server.js, package.json, package-lock.json,
-   le DOSSIER public, et .gitignore.  -> GitHub remplace les fichiers de même nom.
+   le DOSSIER public COMPLET (hls.min.js, manifest.webmanifest, icon.svg),
+   et .gitignore.  -> GitHub remplace les fichiers de même nom.
 4. "Commit changes". Render redéploie tout seul (1 à 2 min).
 
-QUOI DE NEUF CÔTÉ SERVEUR (v2.4) — pense à redéployer :
+QUOI DE NEUF CÔTÉ SERVEUR (v2.6) :
+- Auto-synchro adoucie (fini les petits retours en arrière pendant la lecture).
+- Case "sans écouteurs" pour l'appel (filtre audio côté navigateur).
+- Appel : TURN personnel optionnel via variables d'environnement Render
+  (TURN_URLS / TURN_USERNAME / TURN_CREDENTIAL) — voir README.
+- PWA : manifest + icône (salle installable comme une app).
+
+QUOI DE NEUF CÔTÉ SERVEUR (v2.5) — REDÉPLOIEMENT IMPORTANT :
+- Les envois de plus de 5 min ne sont plus coupés (c'était la vraie cause de
+  beaucoup de 502 « fichier trop lourd »).
+- Le disque se nettoie tout seul (quota MAX_STORE_MB, 3 Go par défaut).
+- Sécurité : un message WebSocket malformé pouvait CRASHER le serveur
+  (corrigé), anti-SSRF contournable par redirection (corrigé), rate-limiting
+  falsifiable (corrigé), en-têtes CSP/nosniff, hls.js auto-hébergé.
+- La salle affiche un message clair + Réessayer au lieu d'un écran noir muet.
+- Le téléchargeur 2.5 attend l'accusé de réception du serveur : redéploie le
+  serveur AVANT (ou en même temps que) la mise à jour du dossier local.
+
+QUOI DE NEUF CÔTÉ SERVEUR (v2.4) :
 - Horodatage des actions (le serveur devient l'horloge de référence) : c'est ce
   qui permet aux clients de compenser la latence réseau sur play/avance/reprise.
 - Coordination du buffering : messages "stall"/"resume" relayés entre les deux.
